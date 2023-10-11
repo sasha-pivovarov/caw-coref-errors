@@ -1,6 +1,15 @@
-## Word-Level Coreference Resolution
 
-This is a repository with the code to reproduce the experiments described in the paper of the same name, which was accepted to EMNLP 2021. The paper is available [here](https://aclanthology.org/2021.emnlp-main.605/).
+## Conjunction-Aware Word-Level Coreference Resolution
+Conjunction-Aware Word-Level Coreference Resolution (🦅 CAW-coref) improves upon the Word-Level Coreference Resolution architecture (WL-coref) and was accepted to CRAC 2023. The paper is available [here](https://arxiv.org/abs/2310.06165). CAW-coref improves upon WL-coref by 0.9% CONLL F1 score, without sacrificing computational efficiency.
+
+### Disclaimer
+This repository is a fork of the Word-Level Coreference Resolution [repository](https://github.com/vdobrovolskii/wl-coref), which contains the code to reproduce the experiments described in the paper of the same name. This original paper is available [here](https://aclanthology.org/2021.emnlp-main.605/).
+
+### List of Changes w.r.t. Word-Level Coreference Resolution
+- Updated the Python and Torch version.
+- Changed `convert_to_heads.py` to pick the Coordinating Conjunction as head-word for conjoined entities, as described in the Conjunction-Aware Word-Level Coreference Resolution paper.
+- [Share CAW-coref model weights](https://www.dropbox.com/scl/fi/yhtf9h9sml91qs8sazdx6/roberta_-e20_2023.09.08_16.14-_release.pt?rlkey=kf60obnpqjyelsg7019g92kv5&dl=0), which improves upon WL-coref by 0.9% CONLL F1 score.
+
 
 ### Table of contents
 1. [Preparation](#preparation)
@@ -57,9 +66,9 @@ Use `-h` flag for more parameters and `CUDA_VISIBLE_DEVICES` environment variabl
 
 Make sure that you have successfully completed all steps of the [Preparation](#preparation) section.
 
-1. [Download](https://www.dropbox.com/s/vf7zadyksgj40zu/roberta_%28e20_2021.05.02_01.16%29_release.pt?dl=0) and save the pretrained model to the `data` directory.
+1. [Download](https://www.dropbox.com/scl/fi/yhtf9h9sml91qs8sazdx6/roberta_-e20_2023.09.08_16.14-_release.pt?rlkey=kf60obnpqjyelsg7019g92kv5&dl=0) and save the pretrained model to the `data` directory.
 
-        https://www.dropbox.com/s/vf7zadyksgj40zu/roberta_%28e20_2021.05.02_01.16%29_release.pt?dl=0
+        https://www.dropbox.com/scl/fi/yhtf9h9sml91qs8sazdx6/roberta_-e20_2023.09.08_16.14-_release.pt?rlkey=kf60obnpqjyelsg7019g92kv5&dl=0
 
 2. Generate the conll-formatted output:
 
@@ -104,6 +113,20 @@ Then run:
 This will utilize the latest weights available in the data directory for the chosen configuration. To load other weights, use the `--weights` argument.
 
 ### Citation
+For CAW-coref, cite:
+
+    @misc{doosterlinck2023cawcoref,
+    title={CAW-coref: Conjunction-Aware Word-level Coreference Resolution}, 
+    author={Karel D'Oosterlinck and Semere Kiros Bitew and Brandon Papineau and Christopher Potts and Thomas Demeester and Chris Develder},
+    year={2023},
+    eprint={2310.06165},
+    archivePrefix={arXiv},
+    primaryClass={cs.CL},
+    url = "https://arxiv.org/abs/2310.06165",
+    }
+
+For the original WL-coref work, cite:
+
     @inproceedings{dobrovolskii-2021-word,
     title = "Word-Level Coreference Resolution",
     author = "Dobrovolskii, Vladimir",
