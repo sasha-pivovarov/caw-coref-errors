@@ -26,7 +26,7 @@ You will need:
 * **OntoNotes 5.0 corpus** (download [here](https://catalog.ldc.upenn.edu/LDC2013T19), registration needed)
 * **Python 2.7** to run conll-2012 scripts
 * **Java runtime** to run [Stanford Parser](https://nlp.stanford.edu/software/lex-parser.shtml)
-* **Python 3.11+** to run the model
+* **Python 3.7+** to run the model
 * **Perl** to run conll-2012 evaluation scripts
 * **CUDA**-enabled machine (48 GB to train, 4 GB to evaluate)
 
@@ -44,7 +44,7 @@ You will need:
         sh get_third_party.sh
 5. Prepare your environment. To do it with conda:
 
-        conda create -y --name wl-coref python=3.11 openjdk perl
+        conda create -y --name wl-coref python=3.7 openjdk perl
         conda activate wl-coref
         python -m pip install -r requirements.txt
 6. Build the corpus in jsonlines format (~20 min):
