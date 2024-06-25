@@ -1,6 +1,6 @@
 """ Contains functions to produce conll-formatted output files with
 predicted spans and their clustering """
-
+import json
 from collections import defaultdict
 from contextlib import contextmanager
 import os
@@ -16,7 +16,7 @@ def write_conll(doc: Doc,
                 f_obj: TextIO):
     """ Writes span/cluster information to f_obj, which is assumed to be a file
     object open for writing """
-    placeholder = "  -" * 7
+    placeholder = "\t_" * 7
     doc_id = doc["document_id"]
     words = doc["cased_words"]
     part_id = doc["part_id"]
@@ -36,7 +36,7 @@ def write_conll(doc: Doc,
                 starts[start].append(cluster_id)
                 ends[end - 1].append(cluster_id)
 
-    f_obj.write(f"#begin document ({doc_id}); part {part_id:0>3d}\n")
+    f_obj.write(f"#newdoc id = {doc_id}")
 
     word_number = 0
     for word_id, word in enumerate(words):
@@ -48,18 +48,23 @@ def write_conll(doc: Doc,
             cluster_info_lst.append(f"({cluster_marker})")
         for cluster_marker in ends[word_id]:
             cluster_info_lst.append(f"{cluster_marker})")
-        cluster_info = "|".join(cluster_info_lst) if cluster_info_lst else "-"
+        cluster_info = "|".join(cluster_info_lst) if cluster_info_lst else "_"
 
         if word_id == 0 or sents[word_id] != sents[word_id - 1]:
             f_obj.write("\n")
             word_number = 0
 
-        f_obj.write(f"{doc_id}  {part_id}  {word_number:>2}"
-                    f"  {word:>{max_word_len}}{placeholder}  {cluster_info}\n")
-
+        f_obj.write(f"{word_number:>2}\t{word:>{max_word_len}}{placeholder}\t{cluster_info}\n")
         word_number += 1
 
     f_obj.write("#end document\n\n")
+
+
+def write_json(doc: Doc,
+                clusters: List[List[Span]],
+                f_obj: TextIO):
+    doc["clusters"] = clusters
+    f_obj.write(json.dumps(doc) + "\n")
 
 
 @contextmanager

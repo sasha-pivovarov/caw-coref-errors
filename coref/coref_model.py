@@ -111,51 +111,64 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
         with conll.open_(self.config, self.epochs_trained, data_split) \
                 as (gold_f, pred_f):
             pbar = tqdm(docs, unit="docs", ncols=0)
-            for doc in pbar:
-                res = self.run(doc)
+            with open(f"{self.config.conll_log_dir}/pred.json", "w") as pred_j:
+                with open(f"{self.config.conll_log_dir}/gold.json", "w") as gold_j:
+                    for doc in pbar:
+                        res = self.run(doc)
 
-                running_loss += self._coref_criterion(res.coref_scores, res.coref_y).item()
+                        running_loss += self._coref_criterion(res.coref_scores, res.coref_y).item()
 
-                if res.span_y:
-                    pred_starts = res.span_scores[:, :, 0].argmax(dim=1)
-                    pred_ends = res.span_scores[:, :, 1].argmax(dim=1)
-                    s_correct += ((res.span_y[0] == pred_starts) * (res.span_y[1] == pred_ends)).sum().item()
-                    s_total += len(pred_starts)
+                        if res.span_y:
+                            pred_starts = res.span_scores[:, :, 0].argmax(dim=1)
+                            pred_ends = res.span_scores[:, :, 1].argmax(dim=1)
+                            s_correct += ((res.span_y[0] == pred_starts) * (res.span_y[1] == pred_ends)).sum().item()
+                            s_total += len(pred_starts)
 
-                if word_level_conll:
-                    conll.write_conll(doc,
-                                      [[(i, i + 1) for i in cluster]
-                                       for cluster in doc["word_clusters"]],
-                                      gold_f)
-                    conll.write_conll(doc,
-                                      [[(i, i + 1) for i in cluster]
-                                       for cluster in res.word_clusters],
-                                      pred_f)
-                else:
-                    conll.write_conll(doc, doc["span_clusters"], gold_f)
-                    conll.write_conll(doc, res.span_clusters, pred_f)
+                        if word_level_conll:
+                            conll.write_conll(doc,
+                                              [[(i, i + 1) for i in cluster]
+                                               for cluster in doc["word_clusters"]],
+                                              gold_f)
+                            conll.write_json(doc,
+                                              [[(i, i + 1) for i in cluster]
+                                               for cluster in doc["word_clusters"]],
+                                              gold_j)
+                            conll.write_conll(doc,
+                                              [[(i, i + 1) for i in cluster]
+                                               for cluster in res.word_clusters],
+                                              pred_f)
+                            conll.write_json(doc,
+                                              [[(i, i + 1) for i in cluster]
+                                               for cluster in res.word_clusters],
+                                              pred_j)
+                        else:
+                            conll.write_conll(doc, doc["span_clusters"], gold_f)
+                            conll.write_conll(doc, res.span_clusters, pred_f)
 
-                w_checker.add_predictions(doc["word_clusters"], res.word_clusters)
-                w_lea = w_checker.total_lea
+                            conll.write_json(doc, doc["span_clusters"], gold_j)
+                            conll.write_json(doc, res.span_clusters, pred_j)
 
-                s_checker.add_predictions(doc["span_clusters"], res.span_clusters)
-                s_lea = s_checker.total_lea
+                        w_checker.add_predictions(doc["word_clusters"], res.word_clusters)
+                        w_lea = w_checker.total_lea
 
-                del res
+                        s_checker.add_predictions(doc["span_clusters"], res.span_clusters)
+                        s_lea = s_checker.total_lea
 
-                pbar.set_description(
-                    f"{data_split}:"
-                    f" | WL: "
-                    f" loss: {running_loss / (pbar.n + 1):<.5f},"
-                    f" f1: {w_lea[0]:.5f},"
-                    f" p: {w_lea[1]:.5f},"
-                    f" r: {w_lea[2]:<.5f}"
-                    f" | SL: "
-                    f" sa: {s_correct / s_total:<.5f},"
-                    f" f1: {s_lea[0]:.5f},"
-                    f" p: {s_lea[1]:.5f},"
-                    f" r: {s_lea[2]:<.5f}"
-                )
+                        del res
+
+                        pbar.set_description(
+                            f"{data_split}:"
+                            f" | WL: "
+                            f" loss: {running_loss / (pbar.n + 1):<.5f},"
+                            f" f1: {w_lea[0]:.5f},"
+                            f" p: {w_lea[1]:.5f},"
+                            f" r: {w_lea[2]:<.5f}"
+                            f" | SL: "
+                            f" sa: {s_correct / s_total:<.5f},"
+                            f" f1: {s_lea[0]:.5f},"
+                            f" p: {s_lea[1]:.5f},"
+                            f" r: {s_lea[2]:<.5f}"
+                        )
             print()
 
         return (running_loss / len(docs), *s_checker.total_lea)
