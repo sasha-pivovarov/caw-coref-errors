@@ -78,27 +78,36 @@ class GoldPredAlignment:
             res_overlaps.append((overlaps, overlap_scores,))
 
         if mean(span_scores):
+            # this entire piece of logic has to be moved outside
             if not all(x[0] for x in res_overlaps):
                 self.error_counts[ErrorType.MISSING_SPAN] += 1
-                has_error = True
+                # has_error = True
             if not all(pred_overlaps.values()):
                 self.error_counts[ErrorType.EXTRA_SPAN] += 1
-                has_error = True
-        return mean(span_scores), has_error
+                # has_error = True
+        return mean(span_scores), res_overlaps, pred_overlaps
 
     def collect_errors(self, gold, pred):
         scores = defaultdict(list)
         gold_error_ix: set[int] = set()
         pred_error_ix: set[int] = set()
+        overlaps_res = []
+        overlaps_pred = []
         for ix, ge in enumerate(gold):
             for pix, pe in enumerate(pred):
-                alignment_score, has_error = self.entity_alignment_score(ge, pe)
-                if has_error:
-                    gold_error_ix.add(ix)
-                pred_error_ix.add(pix)
+                alignment_score, res_overlaps, pred_overlaps = self.entity_alignment_score(ge, pe)
+                overlaps_res.append(res_overlaps)
+                overlaps_pred.append(pred_overlaps)
+                # if has_error:
+                    # gold_error_ix.add(ix)
+                    # pred_error_ix.add(pix)
                 scores[ix].append(alignment_score)
 
         self.alignment = np.array([x[1] for x in sorted(scores.items(), key=lambda x: x[0])])
+
+        # here find top match for every gold entity
+        # also analyse the overlaps and find spans with no overlaps in res and pred
+        
         nonzero_rows = np.count_nonzero(self.alignment, axis=0)
         if any(nonzero_rows > 1):
             self.error_counts[ErrorType.ENTITY_MERGED] = sum(nonzero_rows > 1)
