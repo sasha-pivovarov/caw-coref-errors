@@ -7,38 +7,42 @@ from enum import Enum
 import numpy as np
 from numpy import mean
 from itertools import chain
-
+from collections import Counter
 
 class ErrorType(Enum):
     MISALIGNED_SPAN = 0,
-
-
-EXTRA_SPAN = 1,
-MISSING_SPAN = 2,
-ENTITY_MERGED = 3,
-ENTITY_SPLIT = 4,
-MISSING_ENTITY = 5,
-EXTRA_ENTITY = 6,
+    EXTRA_SPAN = 1,
+    MISSING_SPAN = 2,
+    ENTITY_MERGED = 3,
+    ENTITY_SPLIT = 4,
+    MISSING_ENTITY = 5,
+    EXTRA_ENTITY = 6,
 
 
 class GoldPredAlignment:
-    def __init__(self, gold, pred, tokens):
+
+    def __init__(self, gold, pred, tokens, deprel, head2span, tags):
+        self.deprel = deprel
+        self.head2span = head2span
+        self.dict_head2span = {(x[1], x[2],): x[0] for x in head2span}
+        self.tags = tags
         self.error_counts: tp.DefaultDict[ErrorType, int] = defaultdict(int)
-        self.alignment = None
         self.errors: tp.DefaultDict[ErrorType, tp.List[tp.Tuple]] = defaultdict(list)
         self.tokens: tp.List[str] = tokens
-        self.gold_markup: tp.List[tp.Tuple] = list(
-            chain.from_iterable([[self.token_to_span(y, f"GOLD_{i}", ) for y in x] for i, x in enumerate(gold)]))
-        self.pred_markup: tp.List[tp.Tuple] = list(
-            chain.from_iterable([[self.token_to_span(y, f"PRED_{i}", ) for y in x] for i, x in enumerate(pred)]))
+        self.gold_markup: tp.List[tp.Tuple] = list(chain.from_iterable([[self.token_to_span(y, f"GOLD_{i}",) for y in x] for i, x in enumerate(gold)]))
+        self.pred_markup: tp.List[tp.Tuple] = list(chain.from_iterable([[self.token_to_span(y, f"PRED_{i}",) for y in x] for i, x in enumerate(pred)]))
         self.gold_markup_errors_only: tp.List[tp.Tuple] = []
         self.pred_markup_errors_only: tp.List[tp.Tuple] = []
+        self.all_spans = list(chain.from_iterable(gold))
+        self.missing_spans = []
+        self.extra_spans = []
         self.collect_errors(gold, pred)
+
 
     def overlap_score(self, gold_span, pred_spans):
         overlapping = [i for i in pred_spans if gold_span[0] <= i[0] < gold_span[1] or gold_span[0] < i[1] <= gold_span[1]]
         # if not overlapping:
-        # self.error_counts[ErrorType.MISSING_SPAN] += 1
+        #     self.error_counts[ErrorType.MISSING_SPAN] += 1
         scores = []
         for span in overlapping:
             overlap_length = max(0, min(span[1], gold_span[1]) - max(span[0], gold_span[0]))
@@ -49,7 +53,7 @@ class GoldPredAlignment:
             score = (overlap_length / gold_length) / (outside_length + 1)
             scores.append(score)
 
-            return overlapping, scores
+        return overlapping, scores
 
     @staticmethod
     def sort_clusters(clusters: tp.List):
@@ -107,7 +111,7 @@ class GoldPredAlignment:
 
         # here find top match for every gold entity
         # also analyse the overlaps and find spans with no overlaps in res and pred
-        
+
         nonzero_rows = np.count_nonzero(self.alignment, axis=0)
         if any(nonzero_rows > 1):
             self.error_counts[ErrorType.ENTITY_MERGED] = sum(nonzero_rows > 1)
@@ -128,24 +132,51 @@ class GoldPredAlignment:
             indices = list((nonzero_columns == 1).nonzero()[0])
             gold_error_ix.update(indices)
 
-        self.gold_markup_errors_only = list(
-            chain.from_iterable([[self.token_to_span(y, f"GOLD_{i}", ) for y in x] for x, i in [(gold[j], j,) for j in gold_error_ix]]))
-        self.pred_markup_errors_only = list(
-            chain.from_iterable([[self.token_to_span(y, f"PRED_{i}", ) for y in x] for x, i in [(pred[j], j,) for j in pred_error_ix]]))
+        self.gold_markup_errors_only = list(chain.from_iterable([[self.token_to_span(y, f"GOLD_{i}",) for y in x] for x, i in [(gold[j], j,) for j in gold_error_ix]]))
+        self.pred_markup_errors_only = list(chain.from_iterable([[self.token_to_span(y, f"PRED_{i}",) for y in x] for x, i in [(pred[j], j,) for j in pred_error_ix]]))
 
+    def line(self) -> str:
+        return json.dumps({"text": " ".join(self.tokens), "label": self.gold_markup + self.pred_markup, "tags": self.tags, "deprel": self.deprel, "head2span": self.head2span})
 
-def line(self) -> str:
-    return json.dumps({"text": " ".join(self.tokens), "label": self.gold_markup + self.pred_markup})
+    def error_line(self) -> str:
+        return json.dumps({"text": " ".join(self.tokens), "label": self.gold_markup_errors_only + self.pred_markup_errors_only, "tags": self.tags, "deprel": self.deprel, "head2span": self.head2span, "tokens": self.tokens})
 
+    def token_to_span(self, token, label):
+        start = len(" ".join(self.tokens[0:token[0]])) + 1
+        length = len(" ".join(self.tokens[token[0]:token[1]]))
+        head = self.dict_head2span.get((token[0], token[1]), None)
+        return start, start + length, label, head
 
-def error_line(self) -> str:
-    return json.dumps({"text": " ".join(self.tokens), "label": self.gold_markup_errors_only + self.pred_markup_errors_only})
+    def tags_of_span_head(self, span):
+        head_ix = self.dict_head2span.get(tuple(span))
+        if head_ix is None:
+            return [], []
+        return self.deprel[head_ix], self.tags[head_ix]
 
+    @property
+    def missing_span_tags(self):
+        deps = []
+        tags = []
+        for span in self.missing_spans:
+            d, t = self.tags_of_span_head(span)
+            if d:
+                deps.append(d)
+            if t:
+                tags.append(t)
+        return deps, tags
 
-def token_to_span(self, token, label):
-    start = len(" ".join(self.tokens[0:token[0]])) + 1
-    length = len(" ".join(self.tokens[token[0]:token[1]]))
-    return start, start + length, label
+    @property
+    def all_span_tags(self):
+        deps = []
+        tags = []
+        for span in self.all_spans:
+            d, t = self.tags_of_span_head(span)
+            if d:
+                deps.append(d)
+            if t:
+                tags.append(t)
+        return deps, tags
+
 
 # def link_entities(gold, pred, scores):
 
@@ -160,16 +191,28 @@ assert len(pred_sents) == len(gold_sents)
 
 errors = {x: [] for x in ErrorType}
 total_error_counts: tp.DefaultDict[ErrorType, int] = defaultdict(int)
+ast, mst, asd, msd = [], [], [], []
 for g, p in zip(gold_sents, pred_sents):
     if g["clusters"] and p["clusters"] and g["clusters"] != p["clusters"]:
-        alignment = GoldPredAlignment(g["clusters"], p["clusters"], g["cased_words"])
+        alignment = GoldPredAlignment(g["clusters"], p["clusters"], g["cased_words"], g["deprel"], g["head2span"], g["pos"])
         for key, value in alignment.error_counts.items():
             errors[key].append(alignment)
             total_error_counts[key] += value
+        missing_dep, missing_tags = alignment.missing_span_tags
+        all_dep, all_tags = alignment.all_span_tags
+        ast.extend(all_tags)
+        mst.extend(missing_tags)
+        msd.extend(missing_dep)
+        asd.extend(all_dep)
 
 for key, value in errors.items():
     with Path(f"data/conll_logs/{key}.json").open("w") as io:
         io.writelines([x.error_line() + "\n" for x in value])
 
+with Path(f"data/tag_counts.json").open("w") as io:
+    io.writelines([dict(Counter(ast)), dict(Counter(mst)), dict(Counter(asd)), dict(Counter(msd))])
+
+
 # def align_entities(gold: tp.List[tp.List[int, int]], pred: tp.List[tp.List[int, int]]):
-# for ix, entity in gold:
+#     for ix, entity in gold:
+
