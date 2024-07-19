@@ -1,3 +1,4 @@
+import random
 from collections import defaultdict
 from pathlib import Path
 import json
@@ -8,6 +9,8 @@ import numpy as np
 from numpy import mean
 from itertools import chain
 from collections import Counter
+from scipy.stats import chisquare
+
 
 class ErrorType(Enum):
     MISALIGNED_SPAN = 0,
@@ -22,6 +25,8 @@ class ErrorType(Enum):
 class GoldPredAlignment:
 
     def __init__(self, gold, pred, tokens, deprel, head2span, tags):
+        self.pred_error_ix = set()
+        self.gold_error_ix = set()
         self.deprel = deprel
         self.head2span = head2span
         self.dict_head2span = {(x[1], x[2],): x[0] for x in head2span}
@@ -34,15 +39,15 @@ class GoldPredAlignment:
         self.gold_markup_errors_only: tp.List[tp.Tuple] = []
         self.pred_markup_errors_only: tp.List[tp.Tuple] = []
         self.all_spans = list(chain.from_iterable(gold))
+        self.gold = gold
+        self.pred = pred
         self.missing_spans = []
         self.extra_spans = []
-        self.collect_errors(gold, pred)
-
+        self.alignment = None
+        self.collect_errors()
 
     def overlap_score(self, gold_span, pred_spans):
         overlapping = [i for i in pred_spans if gold_span[0] <= i[0] < gold_span[1] or gold_span[0] < i[1] <= gold_span[1]]
-        # if not overlapping:
-        #     self.error_counts[ErrorType.MISSING_SPAN] += 1
         scores = []
         for span in overlapping:
             overlap_length = max(0, min(span[1], gold_span[1]) - max(span[0], gold_span[0]))
@@ -79,61 +84,54 @@ class GoldPredAlignment:
                 has_error = True
             span_score = mean(overlap_scores) if overlap_scores else 0
             span_scores.append(span_score)
-            res_overlaps.append((overlaps, overlap_scores,))
+            res_overlaps.append(overlaps)
 
-        if mean(span_scores):
-            # this entire piece of logic has to be moved outside
-            if not all(x[0] for x in res_overlaps):
-                self.error_counts[ErrorType.MISSING_SPAN] += 1
-                # has_error = True
-            if not all(pred_overlaps.values()):
-                self.error_counts[ErrorType.EXTRA_SPAN] += 1
-                # has_error = True
         return mean(span_scores), res_overlaps, pred_overlaps
 
-    def collect_errors(self, gold, pred):
+    def collect_errors(self):
         scores = defaultdict(list)
-        gold_error_ix: set[int] = set()
-        pred_error_ix: set[int] = set()
-        overlaps_res = []
-        overlaps_pred = []
-        for ix, ge in enumerate(gold):
-            for pix, pe in enumerate(pred):
+        overlaps_res = [[] for _ in range(len(self.gold))]
+        overlaps_pred = [[] for _ in range(len(self.pred))]
+        for ix, ge in enumerate(self.gold):
+            for pix, pe in enumerate(self.pred):
                 alignment_score, res_overlaps, pred_overlaps = self.entity_alignment_score(ge, pe)
-                overlaps_res.append(res_overlaps)
-                overlaps_pred.append(pred_overlaps)
-                # if has_error:
-                    # gold_error_ix.add(ix)
-                    # pred_error_ix.add(pix)
+                overlaps_res[ix].append(res_overlaps)
+                overlaps_pred[pix].append(pred_overlaps)
                 scores[ix].append(alignment_score)
 
         self.alignment = np.array([x[1] for x in sorted(scores.items(), key=lambda x: x[0])])
 
         # here find top match for every gold entity
         # also analyse the overlaps and find spans with no overlaps in res and pred
-
+        self._find_extra_spans(overlaps_pred)
+        self._find_missing_spans(overlaps_res)
+        self.error_counts[ErrorType.MISSING_SPAN] = len(self.missing_spans)
+        self.error_counts[ErrorType.EXTRA_SPAN] = len(self.extra_spans)
         nonzero_rows = np.count_nonzero(self.alignment, axis=0)
+
         if any(nonzero_rows > 1):
             self.error_counts[ErrorType.ENTITY_MERGED] = sum(nonzero_rows > 1)
             indices = list((nonzero_rows > 1).nonzero()[0])
-            pred_error_ix.update(indices)
+            self.pred_error_ix.update(indices)
         if any(nonzero_rows == 0):
             self.error_counts[ErrorType.EXTRA_ENTITY] = sum(nonzero_rows == 0)
             indices = list((nonzero_rows == 1).nonzero()[0])
-            pred_error_ix.update(indices)
+            self.pred_error_ix.update(indices)
 
         nonzero_columns = np.count_nonzero(self.alignment, axis=1)
         if any(nonzero_columns > 1):
             self.error_counts[ErrorType.ENTITY_SPLIT] = sum(nonzero_columns > 1)
             indices = list((nonzero_columns > 1).nonzero()[0])
-            gold_error_ix.update(indices)
+            self.gold_error_ix.update(indices)
         if any(nonzero_columns == 0):
             self.error_counts[ErrorType.MISSING_ENTITY] = sum(nonzero_columns == 0)
             indices = list((nonzero_columns == 1).nonzero()[0])
-            gold_error_ix.update(indices)
+            self.gold_error_ix.update(indices)
 
-        self.gold_markup_errors_only = list(chain.from_iterable([[self.token_to_span(y, f"GOLD_{i}",) for y in x] for x, i in [(gold[j], j,) for j in gold_error_ix]]))
-        self.pred_markup_errors_only = list(chain.from_iterable([[self.token_to_span(y, f"PRED_{i}",) for y in x] for x, i in [(pred[j], j,) for j in pred_error_ix]]))
+        self.gold_markup_errors_only = list(chain.from_iterable([[self.token_to_span(y, f"GOLD_{i}",) for y in x] for x, i in [(self.gold[j], j,) for j in
+                                                                                                                               self.gold_error_ix]]))
+        self.pred_markup_errors_only = list(chain.from_iterable([[self.token_to_span(y, f"PRED_{i}",) for y in x] for x, i in [(self.pred[j], j,) for j in
+                                                                                                                               self.pred_error_ix]]))
 
     def line(self) -> str:
         return json.dumps({"text": " ".join(self.tokens), "label": self.gold_markup + self.pred_markup, "tags": self.tags, "deprel": self.deprel, "head2span": self.head2span})
@@ -152,6 +150,25 @@ class GoldPredAlignment:
         if head_ix is None:
             return [], []
         return self.deprel[head_ix], self.tags[head_ix]
+
+    def _find_extra_spans(self, pred_overlaps):
+        for ix, ent in enumerate(pred_overlaps):
+            keys = ent[0].keys()
+            for key in keys:
+                if not any([x[key] for x in ent]):
+                    self.pred_error_ix.add(ix)
+                    self.extra_spans.append(self.pred[ix][key])
+
+    def _find_missing_spans(self, gold_overlaps):
+        tuplify = lambda x: [tuple(y) for y in x]
+        flatten_overlap = lambda x: list(chain.from_iterable(chain.from_iterable([tuple(y for y in z if y) for z in x])))  # wildly ugly
+        for ix, ent in enumerate(gold_overlaps):
+
+            difference = set(tuplify(self.gold[ix])).difference(set(tuplify(flatten_overlap(ent))))
+            if difference:
+                self.gold_error_ix.add(ix)
+            self.missing_spans.extend(difference)
+
 
     @property
     def missing_span_tags(self):
@@ -209,8 +226,60 @@ for key, value in errors.items():
     with Path(f"data/conll_logs/{key}.json").open("w") as io:
         io.writelines([x.error_line() + "\n" for x in value])
 
+
+def pair_dicts(dict1, dict2):
+    pair1 = []
+    pair2 = []
+    for key in dict1.keys():
+        pair1.append(dict1[key])
+        pair2.append(dict2.get(key, 1))
+    return pair1, pair2
+
+
+def normalize_dict(d):
+    factor = 1.0 / sum(d.values())
+    normalised_d = {k: v * factor for k, v in d.items()}
+    return normalised_d
+
+
+def pair_norm(dict1, dict2):
+    normalized_d1 = normalize_dict(dict1)
+    normalized_d2 = normalize_dict(dict2)
+    res = {}
+    for key in dict1.keys():
+        res[key] = (normalized_d1[key] / normalized_d2.get(key, 1), dict1[key], dict2.get(key, 1))
+
+    return res
+
+
+normalize = lambda x: [float(i)/sum(x) for i in x]
+
+
 with Path(f"data/tag_counts.json").open("w") as io:
-    io.writelines([dict(Counter(ast)), dict(Counter(mst)), dict(Counter(asd)), dict(Counter(msd))])
+    ast_subsample = random.sample(ast, len(mst))
+    asd_subsample = random.sample(asd, len(asd))
+    mst = dict(Counter(mst))
+    ast = dict(Counter(ast))
+    asts = dict(Counter(ast_subsample))
+    asd = dict(Counter(asd))
+    asds = dict(Counter(asd_subsample))
+    msd = dict(Counter(msd))
+    st_pairs = pair_dicts(mst, asts)
+    sd_pairs = pair_dicts(msd, asds)
+    st_dicts = pair_norm(mst, ast)
+    sd_dicts = pair_norm(msd, asd)
+    st_pairs_norm = [normalize(x) for x in st_pairs]
+    sd_pairs_norm = [normalize(x) for x in sd_pairs]
+    # chisquare_st = chisquare(st_pairs[0], st_pairs[1])
+    # chisquare_sd = chisquare(sd_pairs[0], sd_pairs[1])
+    print(total_error_counts)
+    # print(chisquare_st)
+    # print(chisquare_sd)
+    print(ast, mst, asd, msd)
+    print(st_pairs_norm, sd_pairs_norm)
+    print(sorted(st_dicts.items(), key=lambda x: x[1][0]), sorted(sd_dicts.items(), key=lambda x: x[1][0]))
+
+    io.writelines(json.dumps([ast, mst, asd, msd]))
 
 
 # def align_entities(gold: tp.List[tp.List[int, int]], pred: tp.List[tp.List[int, int]]):
